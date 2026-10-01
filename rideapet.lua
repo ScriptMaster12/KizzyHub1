@@ -23,6 +23,27 @@ if KizzyEnv.KizzyHubRunning then
     return
 end
 KizzyEnv.KizzyHubRunning = true
+
+-- Clean stale KizzyHub auto-execute loaders left in other executor folders.
+-- Older builds could leave more than one EggHub_AutoLoad.lua behind, causing
+-- the hub/notifications to start 2-3 times on every server hop.
+do
+    if type(isfile) == "function" and type(delfile) == "function" then
+        local staleLoaders = {
+            "autoexec/EggHub_AutoLoad.lua",
+            "Autoexec/EggHub_AutoLoad.lua",
+            "autoexecute/EggHub_AutoLoad.lua",
+            "AutoExecute/EggHub_AutoLoad.lua",
+        }
+        for _, path in ipairs(staleLoaders) do
+            pcall(function()
+                if isfile(path) then
+                    delfile(path)
+                end
+            end)
+        end
+    end
+end
 local KIZZYHUB_SESSION_STARTED = os.clock()
 local KIZZYHUB_VERSION = "1.1.0"
 
