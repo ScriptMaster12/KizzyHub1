@@ -15,6 +15,14 @@ local TextChatService = game:GetService("TextChatService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = workspace.CurrentCamera
+
+-- Prevent Auto Load / queue-on-teleport / executor autoexec from starting
+-- multiple KizzyHub copies at the same time.
+local KizzyEnv = (type(getgenv) == "function" and getgenv()) or _G
+if KizzyEnv.KizzyHubRunning then
+    return
+end
+KizzyEnv.KizzyHubRunning = true
 local KIZZYHUB_SESSION_STARTED = os.clock()
 local KIZZYHUB_VERSION = "1.1.0"
 
