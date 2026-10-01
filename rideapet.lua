@@ -3296,75 +3296,6 @@ local AUTOLOAD_CANDIDATES = {
     "AutoExecute/EggHub_AutoLoad.lua",
 }
 
--- Server Hop lives in Settings next to Auto Load. It uses Roblox's public-server
--- endpoint and skips the server the player is currently in.
-local ServerHopBtn = Instance.new("TextButton")
-ServerHopBtn.Size = UDim2.new(1, -8, 0, 28)
-ServerHopBtn.BackgroundColor3 = THEME.Accent
-ServerHopBtn.BorderSizePixel = 0
-ServerHopBtn.Font = Enum.Font.GothamBold
-ServerHopBtn.Text = "Server Hop"
-ServerHopBtn.TextColor3 = Color3.new(1, 1, 1)
-ServerHopBtn.TextSize = 11
-ServerHopBtn.LayoutOrder = nextOrder()
-ServerHopBtn.Parent = SettingsScroll
-round(ServerHopBtn, 6)
-
-local ServerHopBusy = false
-
-local function serverHopNotify(message)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = "KizzyHub • Server Hop",
-            Text = message,
-            Duration = 5,
-        })
-    end)
-end
-
-local function getPublicServers(cursor)
-    local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId)
-        .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
-    if cursor and cursor ~= "" then
-        url ..= "&cursor=" .. HttpService:UrlEncode(cursor)
-    end
-
-    local ok, body = pcall(function()
-        return game:HttpGet(url)
-    end)
-    if not ok or type(body) ~= "string" then return nil end
-
-    local decodedOk, data = pcall(function()
-        return HttpService:JSONDecode(body)
-    end)
-    return decodedOk and data or nil
-end
-
-local function findHopServer()
-    local cursor = nil
-    for _ = 1, 5 do
-        local page = getPublicServers(cursor)
-        if not page or type(page.data) ~= "table" then return nil end
-
-        local choices = {}
-        for _, server in ipairs(page.data) do
-            if server.id and server.id ~= game.JobId
-                and tonumber(server.playing) and tonumber(server.maxPlayers)
-                and tonumber(server.playing) < tonumber(server.maxPlayers) then
-                table.insert(choices, server.id)
-            end
-        end
-
-        if #choices > 0 then
-            return choices[math.random(1, #choices)]
-        end
-
-        cursor = page.nextPageCursor
-        if not cursor or cursor == "" then break end
-    end
-    return nil
-end
-
 local function getQueueOnTeleport()
     if type(queue_on_teleport) == "function" then return queue_on_teleport end
     if type(queueonteleport) == "function" then return queueonteleport end
@@ -3515,39 +3446,6 @@ end
 
 refreshAutoLoadVisual()
 
-ServerHopBtn.Activated:Connect(function()
-    if ServerHopBusy then return end
-    ServerHopBusy = true
-    ServerHopBtn.Text = "Finding Server..."
-
-    task.spawn(function()
-        local serverId = findHopServer()
-        if not serverId then
-            ServerHopBtn.Text = "Server Hop"
-            ServerHopBusy = false
-            serverHopNotify("No different public server was found. Try again in a moment.")
-            return
-        end
-
-        -- Re-queue KizzyHub first when Auto Load is enabled and supported.
-        if AutoLoadEnabled then
-            pcall(queueNextTeleport)
-        end
-
-        serverHopNotify("Joining a different server...")
-        local TeleportService = game:GetService("TeleportService")
-        local ok = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, serverId, LocalPlayer)
-        end)
-
-        if not ok then
-            ServerHopBtn.Text = "Server Hop"
-            ServerHopBusy = false
-            serverHopNotify("Server hop failed. Try again.")
-        end
-    end)
-end)
-
 
 -- Webhook 1: High-luck spawn alerts
 makeHeader(" Webhook 1 - Egg Spawn Alerts")
@@ -3569,6 +3467,162 @@ HatchUI.Url = makeInput("Discord webhook URL for your hatches")
 HatchUI.Min = makeInput("Min pet luck to notify (blank = every hatch)", "")
 HatchUI.Toggle, HatchUI.Test = makeToggleRow()
 setToggleVisual(HatchUI.Toggle, "Hatch Alerts", false)
+
+--====================================================
+-- SERVER HOP (under webhooks)
+--====================================================
+do
+    local TeleportService = game:GetService("TeleportService")
+    local hopBusy = false
+
+    makeHeader(" Server Hop")
+
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -8, 0, 32)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder = nextOrder()
+    row.Parent = SettingsScroll
+
+    local function hopButton(text, xScale, xOff, wScale, wOff, color)
+        local b = Instance.new("TextButton")
+        b.Position = UDim2.new(xScale, xOff, 0, 0)
+        b.Size = UDim2.new(wScale, wOff, 1, 0)
+        b.BackgroundColor3 = color
+        b.BorderSizePixel = 0
+        b.Font = Enum.Font.GothamBold
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.TextSize = 11
+        b.AutoButtonColor = true
+        b.Parent = row
+        round(b, 6)
+        return b
+    end
+
+    local HopAnyBtn = hopButton("Server Hop", 0, 0, 0.5, -3, THEME.Accent)
+    local HopSmallBtn = hopButton("Smallest Server", 0.5, 3, 0.5, -3, THEME.Button)
+
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
+        or (fluxus and fluxus.request)
+
+    local function notify(text)
+        pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "KizzyHub • Server Hop",
+                Text = text,
+                Duration = 5,
+            })
+        end)
+    end
+
+    local function fetchPage(cursor)
+        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100")
+            :format(game.PlaceId)
+        if cursor then url = url .. "&cursor=" .. HttpService:UrlEncode(cursor) end
+
+        local body
+        if httpRequest then
+            local ok, res = pcall(httpRequest, {Url = url, Method = "GET"})
+            if ok and res and res.StatusCode == 200 then body = res.Body end
+        end
+        if not body then
+            local ok, res = pcall(function() return game:HttpGet(url) end)
+            if ok then body = res end
+        end
+        if type(body) ~= "string" then return nil end
+
+        local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
+        if ok and type(data) == "table" then return data end
+        return nil
+    end
+
+    -- Collect joinable servers (not this one, not full). Pages are sorted by
+    -- player count ascending, so the first pages hold the emptiest servers.
+    local function collectServers(maxPages)
+        local list, cursor = {}, nil
+        for _ = 1, maxPages do
+            local data = fetchPage(cursor)
+            if not data then break end
+            for _, s in ipairs(data.data or {}) do
+                if s.id ~= game.JobId and type(s.playing) == "number"
+                    and type(s.maxPlayers) == "number" and s.playing < s.maxPlayers then
+                    list[#list + 1] = s
+                end
+            end
+            cursor = data.nextPageCursor
+            if not cursor then break end
+            task.wait(0.4)
+        end
+        return list
+    end
+
+    local function doHop(smallest)
+        if hopBusy then return end
+        hopBusy = true
+        local btn = smallest and HopSmallBtn or HopAnyBtn
+        local oldText = btn.Text
+        btn.Text = "Searching..."
+
+        task.spawn(function()
+            local servers = collectServers(smallest and 1 or 3)
+            local target
+            if #servers > 0 then
+                if smallest then
+                    table.sort(servers, function(a, b) return a.playing < b.playing end)
+                    target = servers[1]
+                else
+                    target = servers[math.random(1, #servers)]
+                end
+            end
+
+            if not target then
+                notify("No other servers found. Try again in a moment.")
+                btn.Text = oldText
+                hopBusy = false
+                return
+            end
+
+            -- Keep Auto Load working across the hop (these helpers are defined above).
+            if AutoLoadEnabled then
+                pcall(saveHubSource)
+                pcall(queueNextTeleport)
+            end
+
+            btn.Text = "Teleporting..."
+            local failConn
+            failConn = TeleportService.TeleportInitFailed:Connect(function(player)
+                if player ~= LocalPlayer then return end
+                if failConn then failConn:Disconnect() end
+                notify("Teleport failed. Try again.")
+                btn.Text = oldText
+                hopBusy = false
+            end)
+
+            local ok = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
+            end)
+            if not ok then
+                if failConn then failConn:Disconnect() end
+                notify("Teleport error. Try again.")
+                btn.Text = oldText
+                hopBusy = false
+                return
+            end
+
+            -- Safety reset in case the teleport silently never happens.
+            task.delay(15, function()
+                if failConn then failConn:Disconnect() end
+                if hopBusy then
+                    btn.Text = oldText
+                    hopBusy = false
+                end
+            end)
+        end)
+    end
+
+    HopAnyBtn.Activated:Connect(function() doHop(false) end)
+    HopSmallBtn.Activated:Connect(function() doHop(true) end)
+end
 
 -- Automation controls intentionally hidden from the Settings tab.
 -- Keep the objects alive because existing config/callback code references them.
