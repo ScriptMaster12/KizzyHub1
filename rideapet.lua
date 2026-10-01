@@ -3325,33 +3325,31 @@ local function saveAutoLoadEnabled(enabled)
 end
 
 local function makeLoader()
+    return [=[
+repeat task.wait() until game:IsLoaded()
+task.wait(1)
+
+local ok, source = pcall(function()
+    return game:HttpGet("https://raw.githubusercontent.com/ScriptMaster12/KizzyHub1/main/rideapet.lua")
+end)
+
+if ok and type(source) == "string" and source ~= "" then
     local env = (type(getgenv) == "function" and getgenv()) or _G
-    local source = env.KizzyHubCurrentSource
+    env.KizzyHubCurrentSource = source
 
-    if type(source) == "string" and source ~= "" then
-        return string.format([[
-repeat task.wait() until game:IsLoaded()
-task.wait(1)
-local source = %q
-local env = (type(getgenv) == "function" and getgenv()) or _G
-env.KizzyHubCurrentSource = source
-local fn = loadstring(source)
-if fn then pcall(fn) end
-]], source)
+    local fn, loadErr = loadstring(source)
+    if fn then
+        pcall(fn)
+    else
+        warn("[KizzyHub] Auto Load compile failed:", loadErr)
     end
-
-    -- Current script was executed directly, so its own source text is not
-    -- available to Luau. Keep one loader file without creating stale source copies.
-    return [[
-repeat task.wait() until game:IsLoaded()
-task.wait(1)
-warn("[KizzyHub] Auto Load file is ready, but this executor did not expose the current script source.")
-]]
+else
+    warn("[KizzyHub] Auto Load could not fetch the current GitHub script.")
+end
+]=]
 end
 
 local function saveHubSource()
-    -- One-file mode: there is no separate hub-source file to save.
-    -- The canonical EggHub_AutoLoad.lua is overwritten by tryInstallNativeAutoExec().
     return type(writefile) == "function"
 end
 
