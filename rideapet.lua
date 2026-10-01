@@ -3296,7 +3296,6 @@ AutoLoadBtn.Parent = SettingsScroll
 round(AutoLoadBtn, 6)
 
 local AUTOLOAD_CONFIG = "EggHub_AutoLoad.json"
-local AUTOLOAD_SOURCE_FILE = "EggHub_AutoLoad_Source.lua"
 local AUTOLOAD_SOURCE = nil -- FastStart: reuse saved source if available
 local AUTOLOAD_FILE = "EggHub_AutoLoad.lua"
 
@@ -3326,39 +3325,34 @@ local function saveAutoLoadEnabled(enabled)
 end
 
 local function makeLoader()
+    local env = (type(getgenv) == "function" and getgenv()) or _G
+    local source = env.KizzyHubCurrentSource
+
+    if type(source) == "string" and source ~= "" then
+        return string.format([[
+repeat task.wait() until game:IsLoaded()
+task.wait(1)
+local source = %q
+local env = (type(getgenv) == "function" and getgenv()) or _G
+env.KizzyHubCurrentSource = source
+local fn = loadstring(source)
+if fn then pcall(fn) end
+]], source)
+    end
+
+    -- Current script was executed directly, so its own source text is not
+    -- available to Luau. Keep one loader file without creating stale source copies.
     return [[
 repeat task.wait() until game:IsLoaded()
 task.wait(1)
-if type(isfile) == "function" and type(readfile) == "function"
-    and isfile("EggHub_AutoLoad_Source.lua") then
-    local ok, source = pcall(readfile, "EggHub_AutoLoad_Source.lua")
-    if ok and type(source) == "string" then
-        local env = (type(getgenv) == "function" and getgenv()) or _G
-        env.KizzyHubCurrentSource = source
-        local fn = loadstring(source)
-        if fn then pcall(fn) end
-    end
-end
+warn("[KizzyHub] Auto Load file is ready, but this executor did not expose the current script source.")
 ]]
 end
 
 local function saveHubSource()
-    if type(writefile) ~= "function" then return false end
-
-    local source = AUTOLOAD_SOURCE
-    local env = (type(getgenv) == "function" and getgenv()) or _G
-
-    -- Override the stale saved copy with the exact current source when the
-    -- current loader supplied it. No second KizzyHub copy is embedded here.
-    if (not source or source == "") and type(env.KizzyHubCurrentSource) == "string" then
-        source = env.KizzyHubCurrentSource
-    end
-
-    if source and source ~= "" then
-        return pcall(writefile, AUTOLOAD_SOURCE_FILE, source)
-    end
-
-    return type(isfile) == "function" and isfile(AUTOLOAD_SOURCE_FILE)
+    -- One-file mode: there is no separate hub-source file to save.
+    -- The canonical EggHub_AutoLoad.lua is overwritten by tryInstallNativeAutoExec().
+    return type(writefile) == "function"
 end
 
 local function queueNextTeleport()
