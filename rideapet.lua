@@ -238,31 +238,10 @@ for _, obj in ipairs(workspace:GetDescendants()) do
     end
 end
 
-local Folder = workspace:FindFirstChild("RenderedEggs")
+local Folder = workspace:FindFirstChild("RenderedEggs") or workspace:WaitForChild("RenderedEggs", 30)
 if not Folder then
-    warn("[KizzyHub] Waiting for workspace.RenderedEggs...")
-    Folder = workspace:WaitForChild("RenderedEggs", 30)
+    warn("[KizzyHub] workspace.RenderedEggs was not found")
 end
-
-local function getRenderedEggsFolder()
-    local current = workspace:FindFirstChild("RenderedEggs")
-    if current ~= Folder then
-        Folder = current
-    end
-    return Folder
-end
-
-workspace.ChildAdded:Connect(function(child)
-    if child.Name == "RenderedEggs" then
-        Folder = child
-    end
-end)
-
-workspace.ChildRemoved:Connect(function(child)
-    if child == Folder then
-        Folder = nil
-    end
-end)
 
 --====================================================
 -- CONFIG & STATE
@@ -1114,7 +1093,7 @@ do
         -- Original four keep their priority order when selected.
         for _, priority in ipairs(PRIORITY_LIST) do
             if SelectedMapEggs[normalizeName(priority)] then
-                for _, egg in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do
+                for _, egg in ipairs(Folder:GetChildren()) do
                     if matchesKeyword(egg, priority) then
                         return egg, specialVolcanoKind(egg)
                     end
@@ -1123,7 +1102,7 @@ do
         end
 
         -- Then process any other map egg the user selected.
-        for _, egg in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do
+        for _, egg in ipairs(Folder:GetChildren()) do
             if isMapEggSelected(egg) then
                 return egg, specialVolcanoKind(egg)
             end
@@ -1133,7 +1112,7 @@ do
 
     local function findHighestLuckEgg(minimum)
         local bestEgg, bestLuck = nil, -math.huge
-        for _, egg in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do
+        for _, egg in ipairs(Folder:GetChildren()) do
             if egg and egg.Parent then
                 local luck = parseLuck(getEggLuck(egg))
                 if luck >= minimum and luck > bestLuck then
@@ -1850,7 +1829,7 @@ do
 
         local query = normalizeName(SelectorSearch.Text)
         local rows, seen = {}, {}
-        for _, egg in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do
+        for _, egg in ipairs(Folder:GetChildren()) do
             local key = eggSelectionKey(egg)
             if key ~= "" and not seen[key] and (query == "" or key:find(query,1,true)) then
                 seen[key] = true
@@ -1934,7 +1913,7 @@ do
         refreshMapEggRows()
     end)
     SelectAllBtn.Activated:Connect(function()
-        for _, egg in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do SelectedMapEggs[eggSelectionKey(egg)] = true end
+        for _, egg in ipairs(Folder:GetChildren()) do SelectedMapEggs[eggSelectionKey(egg)] = true end
         refreshMapEggRows(); refreshEggSelectorButton()
     end)
     SelectNoneBtn.Activated:Connect(function()
@@ -2242,7 +2221,7 @@ do
     			continue
     		end
 
-    		for _, egg in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do
+    		for _, egg in ipairs(Folder:GetChildren()) do
 
     			if not egg.Parent then
     				continue
@@ -3379,29 +3358,11 @@ local function queueNextTeleport()
         return false
     end
 
-    local loader = [=[
-repeat task.wait() until game:IsLoaded()
-task.wait(1)
-
-local ok, source = pcall(function()
-    return game:HttpGet("https://raw.githubusercontent.com/ScriptMaster12/KizzyHub1/main/rideapet.lua")
-end)
-
-if ok and type(source) == "string" and source ~= "" then
-    local env = (type(getgenv) == "function" and getgenv()) or _G
-    env.KizzyHubCurrentSource = source
-    local fn, loadErr = loadstring(source)
-    if fn then
-        pcall(fn)
-    else
-        warn("[KizzyHub] Queued Auto Load compile failed:", loadErr)
-    end
-else
-    warn("[KizzyHub] Queued Auto Load could not fetch GitHub.")
-end
-]=]
-
-    return pcall(queue, loader)
+    local loader = 'repeat task.wait() until game:IsLoaded(); task.wait(1); local s=game:HttpGet("https://raw.githubusercontent.com/ScriptMaster12/KizzyHub1/main/rideapet.lua"); local f=loadstring(s); if f then f() end'
+    local ok = pcall(function()
+        queue(loader)
+    end)
+    return ok
 end
 
 local function tryInstallNativeAutoExec()
@@ -4207,7 +4168,7 @@ local function unregisterESPEgg(model)
     end
 end
 
-for _, model in ipairs((getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})) do
+for _, model in ipairs(Folder:GetChildren()) do
     task.defer(registerESPEgg, model)
 end
 
@@ -4552,7 +4513,7 @@ do
         Hatches = 0,
         Arrival = "Idle",
         Volcano = "Idle",
-        LastFolderCount = #(getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {}),
+        LastFolderCount = #Folder:GetChildren(),
     }
 
     local function plotEggCount()
@@ -4609,7 +4570,7 @@ do
             "Confirmed pickups: %s | Last: %s\nRendered eggs: %s | Plot eggs: %s\nHatches: %s | Arrival: %s\nVolcano: %s",
             tostring(Activity.Pickups),
             tostring(Activity.LastPickup),
-            tostring(#(getRenderedEggsFolder() and getRenderedEggsFolder():GetChildren() or {})),
+            tostring(#Folder:GetChildren()),
             tostring(plotEggCount()),
             tostring(Activity.Hatches),
             tostring(Activity.Arrival),
