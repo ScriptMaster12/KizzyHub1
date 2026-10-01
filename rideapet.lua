@@ -24,26 +24,6 @@ if KizzyEnv.KizzyHubRunning then
 end
 KizzyEnv.KizzyHubRunning = true
 
--- Clean stale KizzyHub auto-execute loaders left in other executor folders.
--- Older builds could leave more than one EggHub_AutoLoad.lua behind, causing
--- the hub/notifications to start 2-3 times on every server hop.
-do
-    if type(isfile) == "function" and type(delfile) == "function" then
-        local staleLoaders = {
-            "autoexec/EggHub_AutoLoad.lua",
-            "Autoexec/EggHub_AutoLoad.lua",
-            "autoexecute/EggHub_AutoLoad.lua",
-            "AutoExecute/EggHub_AutoLoad.lua",
-        }
-        for _, path in ipairs(staleLoaders) do
-            pcall(function()
-                if isfile(path) then
-                    delfile(path)
-                end
-            end)
-        end
-    end
-end
 local KIZZYHUB_SESSION_STARTED = os.clock()
 local KIZZYHUB_VERSION = "1.1.0"
 
@@ -3318,12 +3298,7 @@ round(AutoLoadBtn, 6)
 local AUTOLOAD_CONFIG = "EggHub_AutoLoad.json"
 local AUTOLOAD_SOURCE_FILE = "EggHub_AutoLoad_Source.lua"
 local AUTOLOAD_SOURCE = nil -- FastStart: reuse saved source if available
-local AUTOLOAD_CANDIDATES = {
-    "autoexec/EggHub_AutoLoad.lua",
-    "Autoexec/EggHub_AutoLoad.lua",
-    "autoexecute/EggHub_AutoLoad.lua",
-    "AutoExecute/EggHub_AutoLoad.lua",
-}
+local AUTOLOAD_FILE = "EggHub_AutoLoad.lua"
 
 local function getQueueOnTeleport()
     if type(queue_on_teleport) == "function" then return queue_on_teleport end
@@ -3394,30 +3369,19 @@ local function queueNextTeleport()
 end
 
 local function tryInstallNativeAutoExec()
-    if type(writefile) ~= "function" then return nil end
-    local loader = makeLoader()
-
-    for _, path in ipairs(AUTOLOAD_CANDIDATES) do
-        local folder = path:match("^(.-)/")
-        if folder and type(makefolder) == "function" then
-            pcall(makefolder, folder)
-        end
-
-        local ok = pcall(writefile, path, loader)
-        if ok and type(isfile) == "function" then
-            local existsOk, exists = pcall(isfile, path)
-            if existsOk and exists then
-                return path
-            end
-        end
+    if type(writefile) ~= "function" then
+        return false
     end
 
-    return nil
+    -- One canonical loader only. Every update overwrites this same file.
+    local loader = makeLoader()
+    local ok = pcall(writefile, AUTOLOAD_FILE, loader)
+    return ok
 end
 
 local function removeNativeAutoExec()
     if type(delfile) ~= "function" or type(isfile) ~= "function" then return end
-    for _, path in ipairs(AUTOLOAD_CANDIDATES) do
+    for _, path in ipairs({AUTOLOAD_FILE}) do
         local ok, exists = pcall(isfile, path)
         if ok and exists then pcall(delfile, path) end
     end
