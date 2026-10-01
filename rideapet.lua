@@ -3354,10 +3354,34 @@ local function saveHubSource()
 end
 
 local function queueNextTeleport()
-    local q = getQueueOnTeleport()
-    if not q then return false end
-    local loader = makeLoader()
-    return pcall(q, loader)
+    local queue = getQueueOnTeleport()
+    if not queue then
+        return false
+    end
+
+    local loader = [=[
+repeat task.wait() until game:IsLoaded()
+task.wait(1)
+
+local ok, source = pcall(function()
+    return game:HttpGet("https://raw.githubusercontent.com/ScriptMaster12/KizzyHub1/main/rideapet.lua")
+end)
+
+if ok and type(source) == "string" and source ~= "" then
+    local env = (type(getgenv) == "function" and getgenv()) or _G
+    env.KizzyHubCurrentSource = source
+    local fn, loadErr = loadstring(source)
+    if fn then
+        pcall(fn)
+    else
+        warn("[KizzyHub] Queued Auto Load compile failed:", loadErr)
+    end
+else
+    warn("[KizzyHub] Queued Auto Load could not fetch GitHub.")
+end
+]=]
+
+    return pcall(queue, loader)
 end
 
 local function tryInstallNativeAutoExec()
