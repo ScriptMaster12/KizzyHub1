@@ -15,6 +15,22 @@ local TextChatService = game:GetService("TextChatService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = workspace.CurrentCamera
+
+-- Re-execution cleanup: server hops / auto-load can run while an older copy is still alive.
+do
+    local env = getgenv and getgenv() or _G
+    if env.KizzyHubUnload then pcall(env.KizzyHubUnload) end
+    if env.PetToolsUnload then pcall(env.PetToolsUnload) end
+    for _, guiName in ipairs({
+        "RenderedEggsESP_AutoFarm_GUI",
+        "PetTools_ESP_GUI",
+        "RenderedEggsESP_AutoFarm_Overlay",
+        "KizzyHub_LoadingScreen",
+    }) do
+        local gui = PlayerGui:FindFirstChild(guiName)
+        if gui then pcall(function() gui:Destroy() end) end
+    end
+end
 local KIZZYHUB_SESSION_STARTED = os.clock()
 local KIZZYHUB_VERSION = "1.1.0"
 
@@ -2970,6 +2986,7 @@ end
 
 -- --- PANEL SETTINGS CONTENTS (WEBHOOKS) ---
 local SettingsScroll = Instance.new("ScrollingFrame")
+SettingsScroll.Name = "SettingsScroll"
 SettingsScroll.Size = UDim2.new(1, 0, 1, 0)
 SettingsScroll.BackgroundTransparency = 1
 SettingsScroll.BorderSizePixel = 0
@@ -3288,7 +3305,9 @@ round(AutoLoadBtn, 6)
 
 local AUTOLOAD_CONFIG = "EggHub_AutoLoad.json"
 local AUTOLOAD_SOURCE_FILE = "EggHub_AutoLoad_Source.lua"
-local AUTOLOAD_SOURCE = nil -- FastStart: reuse saved source if available
+local AUTOLOAD_META_FILE = "EggHub_AutoLoad_Source.meta.json"
+local AUTOLOAD_BUILD = "KizzyHub-1.1.0-serverhop-fix2"
+local AUTOLOAD_SOURCE = nil
 local AUTOLOAD_CANDIDATES = {
     "autoexec/EggHub_AutoLoad.lua",
     "Autoexec/EggHub_AutoLoad.lua",
@@ -3394,23 +3413,84 @@ local function makeLoader()
     return [[
 repeat task.wait() until game:IsLoaded()
 task.wait(1)
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local pg = player and player:FindFirstChildOfClass("PlayerGui")
+local env = getgenv and getgenv() or _G
+if env.KizzyHubUnload then pcall(env.KizzyHubUnload) end
+if env.PetToolsUnload then pcall(env.PetToolsUnload) end
+if pg then
+    for _, name in ipairs({"RenderedEggsESP_AutoFarm_GUI","PetTools_ESP_GUI","RenderedEggsESP_AutoFarm_Overlay","KizzyHub_LoadingScreen"}) do
+        local gui = pg:FindFirstChild(name)
+        if gui then pcall(function() gui:Destroy() end) end
+    end
+end
 if type(isfile) == "function" and type(readfile) == "function"
-    and isfile("EggHub_AutoLoad_Source.lua") then
-    local ok, source = pcall(readfile, "EggHub_AutoLoad_Source.lua")
-    if ok and type(source) == "string" then
-        local fn = loadstring(source)
-        if fn then pcall(fn) end
+    and isfile("EggHub_AutoLoad_Source.lua") and isfile("EggHub_AutoLoad_Source.meta.json") then
+    local HttpService = game:GetService("HttpService")
+    local okMeta, meta = pcall(function() return HttpService:JSONDecode(readfile("EggHub_AutoLoad_Source.meta.json")) end)
+    if okMeta and type(meta) == "table" and meta.Build == "KizzyHub-1.1.0-serverhop-fix2" then
+        local ok, source = pcall(readfile, "EggHub_AutoLoad_Source.lua")
+        if ok and type(source) == "string" then
+            local fn = loadstring(source)
+            if fn then pcall(fn) end
+        end
     end
 end
 ]]
 end
 
+local function sourceLooksCurrent(source)
+    return type(source) == "string"
+        and source:find('ServerHopBtn.Text = "Server Hop"', 1, true) ~= nil
+        and source:find('AUTOLOAD_BUILD = "KizzyHub-1.1.0-serverhop-fix2"', 1, true) ~= nil
+end
+
+local function readSavedSourceIfCurrent()
+    if type(isfile) ~= "function" or type(readfile) ~= "function" then return nil end
+    if not isfile(AUTOLOAD_SOURCE_FILE) or not isfile(AUTOLOAD_META_FILE) then return nil end
+    local okMeta, meta = pcall(function()
+        return HttpService:JSONDecode(readfile(AUTOLOAD_META_FILE))
+    end)
+    if not okMeta or type(meta) ~= "table" or meta.Build ~= AUTOLOAD_BUILD then return nil end
+    local okSource, source = pcall(readfile, AUTOLOAD_SOURCE_FILE)
+    if okSource and sourceLooksCurrent(source) then return source end
+    return nil
+end
+
+local function findCurrentHubSource()
+    if sourceLooksCurrent(AUTOLOAD_SOURCE) then return AUTOLOAD_SOURCE end
+    if type(isfile) ~= "function" or type(readfile) ~= "function" then return nil end
+
+    -- Common executor workspace names. Only accept a file containing this exact build marker.
+    local candidates = {
+        "KizzyHub_ServerHop.lua",
+        "KizzyHub_ServerHop_Fixed.lua",
+        "KizzyHub.lua",
+        "script.lua",
+    }
+    for _, path in ipairs(candidates) do
+        local okExists, exists = pcall(isfile, path)
+        if okExists and exists then
+            local okRead, source = pcall(readfile, path)
+            if okRead and sourceLooksCurrent(source) then return source end
+        end
+    end
+    return nil
+end
+
 local function saveHubSource()
     if type(writefile) ~= "function" then return false end
-    if AUTOLOAD_SOURCE and AUTOLOAD_SOURCE ~= "" then
-        return pcall(writefile, AUTOLOAD_SOURCE_FILE, AUTOLOAD_SOURCE)
+    local source = findCurrentHubSource()
+    if not source then
+        -- Never claim an arbitrary older source is current.
+        return readSavedSourceIfCurrent() ~= nil
     end
-    return type(isfile) == "function" and isfile(AUTOLOAD_SOURCE_FILE)
+    local ok = pcall(function()
+        writefile(AUTOLOAD_SOURCE_FILE, source)
+        writefile(AUTOLOAD_META_FILE, HttpService:JSONEncode({Build = AUTOLOAD_BUILD}))
+    end)
+    return ok
 end
 
 local function queueNextTeleport()
@@ -6547,6 +6627,8 @@ makeDraggable(Bubble, Bubble, restore)
 -- SHUTDOWN
 --====================================================
 
+local HubEnv = getgenv and getgenv() or _G
+
 local function shutdown()
     Running = false
     do
@@ -6561,6 +6643,10 @@ local function shutdown()
         if data.Highlight then pcall(function() data.Highlight:Destroy() end) end
     end
     if ScreenGui then ScreenGui:Destroy() end
+    local extraESP = PlayerGui:FindFirstChild("PetTools_ESP_GUI")
+    if extraESP then pcall(function() extraESP:Destroy() end) end
+    if HubEnv.KizzyHubUnload == shutdown then HubEnv.KizzyHubUnload = nil end
 end
 
+HubEnv.KizzyHubUnload = shutdown
 Close.MouseButton1Click:Connect(shutdown)
